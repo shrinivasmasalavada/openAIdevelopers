@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Handy AI</title>
+
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@800&family=DM+Mono&display=swap" rel="stylesheet">
+
+    <!-- MediaPipe -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+    <style>
+        :root {
+            --bg: #03020a;
+            --accent: #7cffc4;
+            --accent2: #ff6bca;
+            --accent3: #6bb5ff;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            color: #fff;
+            overflow: hidden;
+            font-family: "DM Mono", monospace;
+        }
+
+        /* FILM GRAIN */
+        body::after {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background: url('data:image/svg+xml;utf8,\
+  <svg xmlns="http://www.w3.org/2000/svg">\
+  <filter id="n">\
+  <feTurbulence baseFrequency="0.8" numOctaves="2"/>\
+  </filter>\
+  <rect width="100%" height="100%" filter="url(%23n)" opacity="0.025"/>\
+  </svg>');
+            pointer-events: none;
+        }
+
+        /* TOP STRIPE */
+        #topStripe {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 2px;
+            width: 100%;
+            background: var(--accent);
+            animation: stripe 6s linear infinite;
+        }
+
+        @keyframes stripe {
+            0% {
+                background: var(--accent)
+            }
+
+            33% {
+                background: var(--accent2)
+            }
+
+            66% {
+                background: var(--accent3)
+            }
+        }
+
+        /* VIDEO */
+        video {
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            filter: brightness(0.4);
+        }
+
+        /* CANVAS */
+        canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1);
+        }
+
+        /* SPLASH */
+        #splash {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #03020a;
+            z-index: 10;
+        }
+
+        .logo {
+            font-family: "Syne";
+            font-size: 64px;
+            background: linear-gradient(90deg, #7cffc4, #6bb5ff, #ff6bca);
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+
+        .cta {
+            margin-top: 20px;
+            padding: 12px 24px;
+            border: none;
+            background: var(--accent);
+            color: #000;
+            cursor: pointer;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+
+        /* TOP BAR */
+        #topbar {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            backdrop-filter: blur(10px);
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: flex;
+            gap: 12px;
+            z-index: 5;
+        }
+
+        /* HUD */
+        #hud {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 8px 16px;
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+        }
+
+        /* BUTTON */
+        button.mode {
+            background: none;
+            border: 1px solid #555;
+            padding: 6px 10px;
+            color: #fff;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+
+        button.active {
+            border-color: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="topStripe"></div>
+
+    <!-- SPLASH -->
+    <div id="splash">
+        <div class="logo">Handy AI</div>
+        <div style="opacity:.7">Gesture Intelligence Platform</div>
+        <button class="cta" id="enterBtn">Enter Experience</button>
+    </div>
+
+    <video id="video" autoplay playsinline></video>
+
+    <canvas id="bgCanvas"></canvas>
+    <canvas id="fxCanvas"></canvas>
+    <canvas id="drawCanvas"></canvas>
+
+    <div id="topbar">
+        <div style="font-family:Syne">Handy AI</div>
+        <button class="mode active" data-mode="play">▶</button>
+        <button class="mode" data-mode="shapes">♥</button>
+        <button class="mode" data-mode="write">✏</button>
+    </div>
+
+    <div id="hud">Gesture: -</div>
+
+    <script>
+        const video = document.getElementById("video");
+        const splash = document.getElementById("splash");
+        const hud = document.getElementById("hud");
+
+        let mode = "play";
+        document.querySelectorAll(".mode").forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll(".mode").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                mode = btn.dataset.mode;
+            }
+        });
+
+        /* CANVAS SETUP */
+        const bgCanvas = document.getElementById("bgCanvas");
+        const fxCanvas = document.getElementById("fxCanvas");
+        const drawCanvas = document.getElementById("drawCanvas");
+
+        const bgCtx = bgCanvas.getContext("2d");
+        const fxCtx = fxCanvas.getContext("2d");
+        const drawCtx = drawCanvas.getContext("2d");
+
+        function resize() {
+            [bgCanvas, fxCanvas, drawCanvas].forEach(c => {
+                c.width = innerWidth;
+                c.height = innerHeight;
+            });
+        }
+        window.onresize = resize; resize();
+
+        /* MEDIA PIPE */
+        let hands;
+        let camera;
+
+        function initCamera() {
+            hands = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+
+            hands.setOptions({
+                maxNumHands: 2,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.7,
+                minTrackingConfidence: 0.7
+            });
+
+            hands.onResults(onResults);
+
+            camera = new Camera(video, {
+                onFrame: async () => {
+                    await hands.send({ image: video });
+                },
+                width: 1280,
+                height: 720
+            });
+            camera.start();
+        }
+
+        /* AUDIO */
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function zap() {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = "sawtooth";
+            osc.frequency.setValueAtTime(700, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.12);
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+            osc.connect(gain).connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.12);
+        }
+
+        /* PARTICLES */
+        let particles = [];
+        function spawnParticles(x, y) {
+            for (let i = 0; i < 20; i++) {
+                particles.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 6,
+                    vy: (Math.random() - 0.5) * 6,
+                    life: 40
+                });
+            }
+        }
+
+        /* MAIN LOOP */
+        function draw() {
+            requestAnimationFrame(draw);
+
+            bgCtx.fillStyle = "rgba(0,0,0,0.1)";
+            bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
+
+            fxCtx.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+
+            particles.forEach(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life--;
+                fxCtx.fillStyle = "white";
+                fxCtx.fillRect(p.x, p.y, 2, 2);
+            });
+            particles = particles.filter(p => p.life > 0);
+        }
+
+        /* HAND RESULTS */
+        function dist(a, b) {
+            return Math.hypot(a.x - b.x, a.y - b.y);
+        }
+
+        function onResults(res) {
+            if (!res.multiHandLandmarks) return;
+
+            res.multiHandLandmarks.forEach(hand => {
+                const index = hand[8];
+                const thumb = hand[4];
+
+                const x = index.x * innerWidth;
+                const y = index.y * innerHeight;
+
+                /* DRAW SKELETON */
+                fxCtx.beginPath();
+                hand.forEach(p => {
+                    fxCtx.lineTo(p.x * innerWidth, p.y * innerHeight);
+                });
+                fxCtx.strokeStyle = "rgba(0,255,200,0.6)";
+                fxCtx.stroke();
+
+                /* PINCH */
+                if (dist(index, thumb) < 0.05) {
+                    spawnParticles(x, y);
+                    zap();
+                    hud.innerText = "⚡ Pinch";
+                }
+
+                /* WRITE MODE */
+                if (mode === "write") {
+                    drawCtx.lineWidth = 4;
+                    drawCtx.strokeStyle = "hsl(" + Date.now() % 360 + ",100%,60%)";
+                    drawCtx.lineTo(x, y);
+                    drawCtx.stroke();
+                }
+            });
+        }
+
+        /* START */
+        document.getElementById("enterBtn").onclick = () => {
+            splash.style.opacity = 0;
+            setTimeout(() => splash.style.display = "none", 600);
+            initCamera();
+            draw();
+        };
+    </script>
+
+</body>
+
+</html>
